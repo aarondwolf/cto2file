@@ -1,9 +1,9 @@
 *! version 1.0.1  19mar2018 Aaron Wolf, awolf@pih.org
 cap program drop cto2file
 program define cto2file
-	
+
 	version 15
-	
+
 	syntax using/, 	SAve(string) 				///
 					[							///
 					DEFault(name) 				///
@@ -29,23 +29,23 @@ program define cto2file
 					novarnum					///
 					COmmand(string asis)		///
 					]
-					
 
-	clear				
+
+	clear
 	* Ensure that Input document is excel, and output is either pdf or docx
-	
+
 	if strmatch("`using'","*.xls") != 1 & strmatch("`using'","*.xlsx") != 1 {
 		di as error "Using file extension must be .xls or .xlsx"
 		exit 198
 	}
-	
+
 	if strmatch("`save'","*.pdf") == 1 			local doc "pdf"
 	else if strmatch("`save'","*.docx") == 1 	local doc "docx"
 	else {
 		di as error "Saving file extension must be .pdf or .docx"
 		exit 198
 	}
-	
+
 	* Ensure Omit, Keep, and Drop types are valid
 	foreach type in `droptype' `omittype' `keeptype' {
 		cap assert 	inlist(	"`type'","audio","audio audit","barcode",			///
@@ -64,8 +64,8 @@ program define cto2file
 				di as error "`type' is not a valid SurveyCTO type"
 				exit 198
 				}
-		}	
-	
+		}
+
 	* Confirm scheme is in our list
 	if "`scheme'" == "" local scheme "blue"
 	cap assert inlist("`scheme'","blue","red","orange","purple","green","colorful","drab")
@@ -79,37 +79,37 @@ program define cto2file
 	if "`default'" == "" local default "english"
 	*  Set language equal to the default language if language is blank
 	if "`language'" == "" local language "`default'"
-	
+
 	* Generate local macro for types to omit from question numbers
 	local omitttypes_default `""begin group" "begin repeat" "comments" "end group" "end repeat" "note" "username" "caseid" "start" "end" "deviceid" "text audit" "audio audit""'
 	local omittypes : list omitttypes_default | omittypes
 	local omittypes : list omittypes - keeptypes
-	
-	
+
+
 	* Import Survey file
 	qui import excel using "`using'", firstrow sheet("survey") clear
 	qui drop if missing(type)
-	
+
 	* Execute optional "replace" commands
 	local replace `"`command'"'
 	foreach x in `command' {
 		`x'
 	}
-	
+
 	* Remove all leading and trailing blanks from string variables
 	qui ds, has(type string)
 	foreach v in `r(varlist)' {
 		qui replace `v' = strtrim(`v')
 	}
-	
+
 	* Rename default label and hint with default language
 	rename label label`default'
 	rename hint hint`default'
-	
+
 	* Keep labels and hints for the language we are exporting in
 	keep type name label`language' hint`language' constraint relevance disabled response_note required
 	qui gen sort = _n
-	
+
 	* Drop unwanted variables in "drop" macros
 	foreach n of local dropnames {
 		qui drop if name == "`n'"
@@ -120,7 +120,7 @@ program define cto2file
 	foreach n of local dropgroups {
 		qui drop if name == "`n'"
 	}
-	
+
 	* Generate Question variable
 	qui gen question = 1
 		* Omitted types are not questions
@@ -141,19 +141,19 @@ program define cto2file
 			qui replace questions == 0 if name == "`n'"
 			qui replace other = 1 if name == "`n'"
 		}
-	
+
 	* Generate Question Variable Numbers
-	qui bysort question (sort): gen varnumber = "V" + string(_n,"%03.0f") if question == 1	
-	
+	qui bysort question (sort): gen varnumber = "V" + string(_n,"%03.0f") if question == 1
+
 	* Generate Note numbers
 	qui gen isnote = type == "note"
 	qui bysort isnote (sort): gen notenumber = "__n" + string(_n,"%02.0f") if isnote == 1
 	qui replace varnumber = notenumber if question != 1 & isnote == 1
-	
-	
+
+
 	* Drop "other" variables entirely unless "keepother" is specified
 	if "`keepother'" != "keepother" qui keep if other == 0
-	
+
 	* Separate out "select_one" and "select_multiple" variable types
 	qui split type, parse(" ") gen(type)
 	qui replace type1 = "" if !inlist(type1,"select_one","select_multiple")
@@ -179,7 +179,7 @@ program define cto2file
 	qui egen module = concat(group*), punct(".")
 	qui egen tablename = concat(group*)
 		qui replace tablename = "table_" + tablename
-		
+
 
 	* Make relevance strings more readable
 	if "`keeprelevance'" == "" {
@@ -203,7 +203,7 @@ program define cto2file
 		foreach sign in ">" "<" "!" {
 			qui replace relevance = subinstr(relevance,"`sign' =","`sign'=",.)
 		}
-		
+
 		forvalues i = 1 / `c(N)' {
 			if !inlist(`type[`i']',"end group","end repeat") {
 				local name = name[`i']
@@ -212,33 +212,33 @@ program define cto2file
 			}
 		}
 	}
-	
-	
+
+
 	* Replace "$" and "{" or "}" with [ ]
 	foreach x in label hint {
 		qui replace `x'`language' = subinstr(`x'`language',"$","",.)
 		qui replace `x'`language' = subinstr(`x'`language',"{","[",.)
 		qui replace `x'`language' = subinstr(`x'`language',"}","]",.)
 	}
-		
+
 	* Replace apostrophe's with \'
 	qui replace label`language' = subinstr(label`language',"'","`=char(39)'",.)
 	qui replace hint`language' = subinstr(hint`language',"'","`=char(39)'",.)
 	qui replace label`language' = subinstr(label`language',"`","`=char(39)'",.)
 	qui replace hint`language' = subinstr(hint`language',"`","`=char(39)'",.)
-	
+
 	* Preserve line breaks
 	qui replace label`language' = subinstr(label`language',"`=char(10)'`=char(10)'","`=char(10)'",.)	// Collapse all spaces to one
 	qui replace hint`language' = subinstr(hint`language',"`=char(10)'`=char(10)'","`=char(10)'",.)	// Collapse all spaces to one
-	
+
 	qui split label`language', parse("`=char(10)'") gen(lblsgmt)
 	qui split hint`language', parse("`=char(10)'") gen(hintsgmt)
-	
+
 	* Replace double quote with single quotes
 	qui replace label`language' = subinstr(label`language',`"""',"`=char(39)'",.)
 	qui replace hint`language' = subinstr(hint`language',`"""',"`=char(39)'",.)
 
-	
+
 	* Create variable for number of columns before and after decimal (based on constraint)
 	quietly {
 		gen constraint_orig = constraint
@@ -286,7 +286,7 @@ program define cto2file
 	qui gen row = _n
 	qui sum row
 	local rows = `r(max)'
-	
+
 	* Create color palettes
 	if "`scheme'" == "blue" {
 		local c_1 	031926
@@ -344,7 +344,7 @@ program define cto2file
 		local c_4	0e557f
 		local c_5	277cad
 		}
-		
+
 	* Local Macros for Gray Colors
 	local g_1 3f3c3c
 	local g_2 585453
@@ -352,7 +352,7 @@ program define cto2file
 	local g_4 a7a3a2
 	local g_5 ccc7c5
 
-	
+
 	* Create local macros for each heading level and font style for the table
 	local titletext			`"font("Calibri Light",28,"`c_1'")"'
 	local subtitletext		`"font(Calibri,11,"`c_3'")"'
@@ -361,7 +361,7 @@ program define cto2file
 	local endtext 			`"font("Calibri Light",8,"`g_4'") bold italic"'
 	local labeltext			`"font(Calibri,10)"'
 	local hinttext			`"font(Calibri,8,"`g_3'") italic"'
-	
+
 	local h1 `"font("Calibri Light",16,"`c_2'")"'
 	local h2 `"font("Calibri Light",13,"`c_3'")"'
 	local h3 `"font("Calibri Light",12,"`c_4'")"'
@@ -372,12 +372,12 @@ program define cto2file
 	local h7 `"font("Calibri Light",9,"`c_5'") italic"'
 	local h8 `"font("Calibri Light",8,"`c_5'") italic"'
 	local h9 `"font("Calibri Light",7,"`c_5'") italic"'
-	
+
 	* Column Macros
 	local columns 10
 	local lspan 5
 	local rspan 4
-	
+
 	local nspan = `columns' - 1
 
 	* Begin document
@@ -386,10 +386,10 @@ program define cto2file
 		put`doc' text ("`title'")
 	put`doc' paragraph, 	`subtitletext'
 		put`doc' text ("`subtitle'")
-	
+
 	tempfile survey
 	qui save `survey'
-	
+
 	* Generate tables of choices for each choice-set
 	qui import excel using "`using'", firstrow sheet("choices") clear
 	qui rename label label`default'
@@ -401,7 +401,7 @@ program define cto2file
 	qui replace label`language' = label`default' if missing(label`language')
 	qui replace label`language' = subinstr(label`language',"'","`=char(39)'",.)
 	qui replace label`language' = subinstr(label`language',"`","`=char(39)'",.)
-	
+
 	* Replace "$" and "{" or "}" with [ ]
 	qui replace label`language' = subinstr(label`language',"$","",.)
 	qui replace label`language' = subinstr(label`language',"{","[",.)
@@ -424,10 +424,10 @@ program define cto2file
 		}
 		qui put`doc' table `l' = data(value label`language') if list_name == "`l'", border(all,nil) memtable `choicetab'
 	}
-	
+
 	if "`doc'" == "docx" local layout "layout(autofitcontents)"
 	else local layout "width(100%)"
-	
+
 	* Generate "Underline" for text variables
 	putdocx table text_inside = (1,1), border(all,nil) border(bottom,thick,`g_2') layout(autofitwindow) memtable
 	putdocx table text = (1,1), border(all,nil) layout(autofitwindow) memtable cellmargin(bottom,4pt) cellmargin(top,8pt)
@@ -440,16 +440,16 @@ program define cto2file
 	put`doc' table text = (1,1), border(all,nil) memtable `choicetab' `cellmargin'
 		put`doc' table text(1,1) = table(text_inside)
 	*/
-	
-	
+
+
 	* Re-load survey data
-	qui use `survey', clear	
-	
+	qui use `survey', clear
+
 	* Replace varnumber as name if option novarnum is specified
 	qui if "`varnum'" == "novarnum" replace varnumber = name if !inlist(type,"end group","end repeat")
-	
-	
-	
+
+
+
 	sort sort
 	* Create Main Table
 	putdocx table surveytable = (`rows',`columns'), border(all,single,`g_5')
@@ -466,11 +466,11 @@ program define cto2file
 			local heading = "h" + strofreal(heading[`i'])
 			if !missing(relevance[`i']) local linebreak linebreak
 			else local linebreak ""
-			
+
 			if heading[`i'] == 1 putdocx table surveytable(`i',1) = (""), `nametext' border(start,nil) border(end,nil) linebreak
 			putdocx table surveytable(`i',1) = ("`module' - `label'`repeat'"), colspan(`columns') ``heading'' `append' `linebreak'
 			if !missing(relevance[`i']) putdocx table surveytable(`i',1) = (relevance[`i']), append `relevancetext'
-			
+
 			}
 		else if type[`i'] == "end group" |  type[`i'] == "end repeat" {
 			qui sum row if name == name[`i']
@@ -478,9 +478,9 @@ program define cto2file
 			local module = module[`r(min)']
 			if type[`i'] == "end repeat" local repeat "Repeat "
 			else local repeat ""
-			
+
 			putdocx table surveytable(`i',1) = ("	End `repeat'Group: `module' - `label'"), colspan(`columns') `endtext' halign(right)
-		
+
 		}
 		else if type[`i'] == "note" {
 			putdocx table surveytable(`i',1) = (varnumber[`i']), font("",10)
@@ -492,7 +492,7 @@ program define cto2file
 				putdocx table surveytable(`i',2) = (""), colspan(`nspan') `nametext'
 				if !missing(relevance[`i']) 		putdocx table surveytable(`i',2) = (relevance[`i']), `relevancetext' append linebreak
 			}
-	
+
 			foreach x of varlist lblsgmt* {
 				if !missing(`x'[`i']){
 					local segnum = real(subinstr("`x'","lblsgmt","",.))
@@ -503,7 +503,7 @@ program define cto2file
 						else if !missing(hintsgmt1[`i']) local linebreak linebreak
 						else local linebreak ""
 					}
-				else if !missing(hintsgmt1[`i']) local linebreak linebreak					
+				else if !missing(hintsgmt1[`i']) local linebreak linebreak
 				else local linebreak ""
 				putdocx table surveytable(`i',2) = (`x'[`i']), `labeltext' append `linebreak'
 				}
@@ -520,7 +520,7 @@ program define cto2file
 				else local linebreak ""
 				putdocx table surveytable(`i',2) = (`x'[`i']), `hinttext' append `linebreak'
 				}
-			}			
+			}
 		}
 		else {
 			putdocx table surveytable(`i',1) = (varnumber[`i']), font("",10)
@@ -536,9 +536,9 @@ program define cto2file
 				if !missing(lblsgmt1[`i']) | !missing(hintsgmt1[`i']) local linebreak linebreak
 				else local linebreak ""
 			}
-				
+
 			if !missing(relevance[`i']) putdocx table surveytable(`i',2) = (relevance[`i']), `relevancetext' append `linebreak'
-			
+
 			foreach x of varlist lblsgmt* {
 				if !missing(`x'[`i']){
 					local segnum = real(subinstr("`x'","lblsgmt","",.))
@@ -549,7 +549,7 @@ program define cto2file
 						else if !missing(hintsgmt1[`i']) local linebreak linebreak
 						else local linebreak ""
 					}
-				else if !missing(hintsgmt1[`i']) local linebreak linebreak					
+				else if !missing(hintsgmt1[`i']) local linebreak linebreak
 				else local linebreak ""
 				putdocx table surveytable(`i',2) = (`x'[`i']), `labeltext' append `linebreak'
 				}
@@ -566,24 +566,24 @@ program define cto2file
 					else local linebreak ""
 					putdocx table surveytable(`i',2) = (`x'[`i']), `hinttext' append `linebreak'
 				}
-			}			
-			
+			}
+
 			if type[`i'] == "calculate" 		putdocx table surveytable(`i',3) = ("Calculated Value"), `nametext' colspan(`rspan')
-			
+
 			else if type1[`i'] == "select_one" | type1[`i'] == "select_multiple"	{
 				local table = type2[`i']
 				if type1[`i'] == "select_one" local select "Select One:"
 				else local select "Select All That Apply:"
-				
+
 				putdocx table surveytable(`i',3) = ("`select'"), `text' italic colspan(`rspan')
 				putdocx table surveytable(`i',3) = table(`table'), append
 				}
-				
+
 			else if type[`i'] == "text" {
 				putdocx table surveytable(`i',3) = table(text), colspan(`rspan') valign(bottom)
 				putdocx table surveytable(`i',3), append
 				}
-				
+
 			else if type[`i'] == "integer" {
 				local tblname = name[`i'] + "_int"
 				local columns_pre = columns_pre[`i']
@@ -591,7 +591,7 @@ program define cto2file
 				putdocx table `tblname' = (1,`columns_pre'), border(all,single,`gs_2') border(top,nil) memtable layout(autofitcontents)
 				putdocx table surveytable(`i',3) = table(`tblname'), colspan(`rspan') valign(center) halign(center)
 				}
-				
+
 			else if type[`i'] == "decimal" {
 				local tblname = name[`i'] + "_dec"
 				local columns_pre = columns_pre[`i']
@@ -607,11 +607,11 @@ program define cto2file
 
 			else putdocx table surveytable(`i',3), colspan(`rspan')
 		}
-	
+
 	}
-	
-	
-	
+
+
+
 	put`doc' save "`save'", replace
 	di as text "Document saved as " as result `"`save'"'
 	*
