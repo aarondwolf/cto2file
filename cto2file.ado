@@ -1,4 +1,4 @@
-*! version 1.0.1  19mar2018 Aaron Wolf, awolf@pih.org
+*! version 2.0.1  9may2020 Aaron Wolf, aaron.wolf@yale.edu
 cap program drop cto2file
 program define cto2file
 
@@ -23,7 +23,6 @@ program define cto2file
 					MAXheading(integer 3)		///
 					INTlength(integer 9)		///
 					DEClength(integer 9)		///
-					scheme(name)				///
 					Pagesize(passthru)			///
 					split						///
 					novarnum					///
@@ -32,17 +31,18 @@ program define cto2file
 
 
 	clear
-	* Ensure that Input document is excel, and output is either pdf or docx
-
+	
+//	Syntax Checks
+	* Ensure that Input document is excel, and output is docx
 	if strmatch("`using'","*.xls") != 1 & strmatch("`using'","*.xlsx") != 1 {
 		di as error "Using file extension must be .xls or .xlsx"
 		exit 198
 	}
 
-	if strmatch("`save'","*.pdf") == 1 			local doc "pdf"
-	else if strmatch("`save'","*.docx") == 1 	local doc "docx"
+	if 		strmatch("`save'","*.docx") == 1 	local file "docx"
+	else if strmatch("`save'","*.xlsx") == 1 	local file "xlsx"
 	else {
-		di as error "Saving file extension must be .pdf or .docx"
+		di as error "Saving file extension must be .docx or .xlsx"
 		exit 198
 	}
 
@@ -66,31 +66,25 @@ program define cto2file
 				}
 		}
 
-	* Confirm scheme is in our list
-	if "`scheme'" == "" local scheme "blue"
-	cap assert inlist("`scheme'","blue","red","orange","purple","green","colorful","drab")
-		if _rc == 9 {
-			di as error "Invalid color scheme"
-			exit 198
-			}
-	confirm names `scheme'
-
 	* Set defaut langauge to English if default is blank
 	if "`default'" == "" local default "english"
 	*  Set language equal to the default language if language is blank
-	if "`language'" == "" local language "`default'"
+	if "`language'" == "" {
+		di as result "No language specified. `default' assumed."
+		local language "`default'"
+	}
 
 	* Generate local macro for types to omit from question numbers
 	local omitttypes_default `""begin group" "begin repeat" "comments" "end group" "end repeat" "note" "username" "caseid" "start" "end" "deviceid" "text audit" "audio audit""'
 	local omittypes : list omitttypes_default | omittypes
 	local omittypes : list omittypes - keeptypes
 
-
+//	Import Survey sheet and begin cleaning
 	* Import Survey file
 	qui import excel using "`using'", firstrow sheet("survey") clear
 	qui drop if missing(type)
 
-	* Execute optional "replace" commands
+	* Execute optional commands
 	local replace `"`command'"'
 	foreach x in `command' {
 		`x'
@@ -102,9 +96,23 @@ program define cto2file
 		qui replace `v' = strtrim(`v')
 	}
 
-	* Rename default label and hint with default language
-	rename label label`default'
-	rename hint hint`default'
+	* Rename default label and hint (no specified language) with default language
+	cap confirm variable label`language', exact
+		if _rc {
+			cap confirm variable label, exact
+			if _rc {
+				di as error "There is no column named label:`language' or simply label in survey sheet. Please select a different language."
+				error 198				
+			}
+			else rename label label`language'
+		}
+	
+	cap confirm variable hint`language', exact
+	if _rc {
+		cap confirm variable hint, exact
+		if !_rc rename hint hint`language'
+		
+	}
 
 	* Keep labels and hints for the language we are exporting in
 	keep type name label`language' hint`language' constraint relevance disabled response_note required
@@ -161,8 +169,12 @@ program define cto2file
 
 	* Generate Heading Level and drop
 	sort sort
-	qui gen heading = sum(inlist(type,"begin group","begin repeat") - inlist(type,"end group","end repeat"))
+	qui gen heading = sum(inlist(type,"begin group","begin repeat") - inlist(type,"end group","end repeat")) // This calculates the heading level of each begin_group statement
 	qui gen group0 = 1
+	if "`maxheading'" == "" {
+		qui sum heading
+		local maxheading `r(max)'		
+	}	
 	forvalues i = 1/`maxheading' {
 		local ph = `i' - 1
 		local groups = "`groups' group`ph'"
@@ -170,13 +182,13 @@ program define cto2file
 		qui replace group`i' = 0 if group`i' == .
 		qui sum group`i'
 		local maxlen = strlen(string(`r(max)'))
-		*format %0`maxlen'.0f group`i'
 	}
 	forvalues i = 1/`maxheading' {
 		qui tostring group`i', replace usedisplayformat
 	}
 	drop group0
 	qui egen module = concat(group*), punct(".")
+	qui replace module = group1 if heading == 1
 	qui egen tablename = concat(group*)
 		qui replace tablename = "table_" + tablename
 
@@ -231,7 +243,7 @@ program define cto2file
 
 	* Preserve line breaks
 	qui replace label`language' = subinstr(label`language',"`=char(10)'`=char(10)'","`=char(10)'",.)	// Collapse all spaces to one
-	qui replace hint`language' = subinstr(hint`language',"`=char(10)'`=char(10)'","`=char(10)'",.)	// Collapse all spaces to one
+	qui replace hint`language' = subinstr(hint`language',"`=char(10)'`=char(10)'","`=char(10)'",.)		// Collapse all spaces to one
 
 	qui count if label`language' != ""
 	if `r(N)' > 0 qui split label`language', parse("`=char(10)'") gen(lblsgmt)
@@ -294,107 +306,8 @@ program define cto2file
 	qui sum row
 	local rows = `r(max)'
 
-	* Create color palettes
-	if "`scheme'" == "blue" {
-		local c_1 	031926
-		local c_2	032438
-		local c_3	0c4363
-		local c_4	0e557f
-		local c_5	277cad
-		}
-	else if "`scheme'" == "green" {
-		local c_1 	2f3627
-		local c_2	5c723f
-		local c_3	768c59
-		local c_4	73914d
-		local c_5	5c664f
-		}
-	else if "`scheme'" == "purple" {
-		local c_1 	32021f
-		local c_2	492d3e
-		local c_3	6d5865
-		local c_4	8c6e80
-		local c_5	a87594
-		}
-	else if "`scheme'" == "red" {
-		local c_1 	3d1515
-		local c_2	7a2d2d
-		local c_3	7f3d3d
-		local c_4	935e5e
-		local c_5	8a6161
-		}
-	else if "`scheme'" == "orange" {
-		local c_1 	3d2015
-		local c_2	68270d
-		local c_3	a32e00
-		local c_4	d36135
-		local c_5	f2c1ae
-		}
-	else if "`scheme'" == "drab" {
-		local c_1 	363020
-		local c_2	605b4e
-		local c_3	a39265
-		local c_4	746f63
-		local c_5	c6bda5
-		}
-	else if "`scheme'" == "colorful" {
-		local c_1 	3a2e39
-		local c_2	1e555c
-		local c_3	f15152
-		local c_4	edb183
-		local c_5	b29e96
-		}
-	else {							// Default to blues
-		local c_1 	031926
-		local c_2	032438
-		local c_3	0c4363
-		local c_4	0e557f
-		local c_5	277cad
-		}
 
-	* Local Macros for Gray Colors
-	local g_1 3f3c3c
-	local g_2 585453
-	local g_3 706d6c
-	local g_4 a7a3a2
-	local g_5 ccc7c5
-
-
-	* Create local macros for each heading level and font style for the table
-	local titletext			`"font("Calibri Light",28,"`c_1'")"'
-	local subtitletext		`"font(Calibri,11,"`c_3'")"'
-	local nametext 			`"font(Calibri,8,"`g_1'") italic"'
-	local relevancetext 	`"font(Calibri,8,"`g_3'") italic"'
-	local endtext 			`"font("Calibri Light",8,"`g_4'") bold italic"'
-	local labeltext			`"font(Calibri,10)"'
-	local hinttext			`"font(Calibri,8,"`g_3'") italic"'
-
-	local h1 `"font("Calibri Light",16,"`c_2'")"'
-	local h2 `"font("Calibri Light",13,"`c_3'")"'
-	local h3 `"font("Calibri Light",12,"`c_4'")"'
-	local h4 `"font("Calibri Light",11,"`c_5'") bold"'
-	local h5 `"font("Calibri Light",11,"`c_5'")"'
-	local h6 `"font("Calibri Light",11,"`c_5'") italic"'
-	local h6 `"font("Calibri Light",10,"`c_5'") italic"'
-	local h7 `"font("Calibri Light",9,"`c_5'") italic"'
-	local h8 `"font("Calibri Light",8,"`c_5'") italic"'
-	local h9 `"font("Calibri Light",7,"`c_5'") italic"'
-
-	* Column Macros
-	local columns 10
-	local lspan 5
-	local rspan 4
-
-	local nspan = `columns' - 1
-
-	* Begin document
-	put`doc' clear
-	put`doc' begin, `pagesize' `labeltext'
-	put`doc' paragraph, 	`titletext'
-		put`doc' text ("`title'")
-	put`doc' paragraph, 	`subtitletext'
-		put`doc' text ("`subtitle'")
-
+//	Send choices to mata tables
 	tempfile survey
 	qui save `survey'
 
@@ -423,63 +336,103 @@ program define cto2file
 				di as error "`l' is not a valid table name."
 				exit 7
 			}
-		if "`doc'" == "docx" local choicetab "layout(autofitcontents) cellmargin(right,0pt)"
 		else local choicetab "width(100%)"
 		cap assert !missing("`l'")
 		if _rc != 0 {
 			di as error "`l' is blank"
 			exit
 		}
-		qui put`doc' table `l' = data(value label`language') if list_name == "`l'", border(all,nil) memtable `choicetab'
+		
+		* Pull choice list to mata matrix
+		gen keep = list_name == "`l'"						// List indicator
+		cap confirm string variable value
+			if _rc 	mata: values = st_data(.,("value"))		// Pull real data if values are real
+			else 	mata: values = st_sdata(.,("value"))	// Pull string data if values have strings
+		mata: labels = st_sdata(.,("label`language'"))		// Pull labels
+		mata: keep = st_data(.,("keep"))
+		mata: `l' = select((values,labels),keep)			// Keep values and labels from list
+		drop keep
 	}
 
-	if "`doc'" == "docx" local layout "layout(autofitcontents)"
-	else local layout "width(100%)"
-
 	* Generate "Underline" for text variables
-	putdocx table text_inside = (1,1), border(all,nil) border(bottom,thick,`g_2') layout(autofitwindow) memtable
-	putdocx table text = (1,1), border(all,nil) layout(autofitwindow) memtable cellmargin(bottom,4pt) cellmargin(top,8pt)
-		putdocx table text(1,1) = table(text_inside)
+	mata: text = " "
 
+	
+********************************************************************************
+*
+*		Write Document
+*
+********************************************************************************
 
-	/* Generate "Underline" for text variables --> NEED TO WORK ON THIS.... NOT MAKING THE BOXES RIGHT
-	put`doc' table text_inside = (1,1), border(all,nil) border(bottom,single,`g_2') `choicetab' memtable
-	if "`doc'" == "docx" local cellmargin "cellmargin(bottom,4pt) cellmargin(top,8pt)"
-	put`doc' table text = (1,1), border(all,nil) memtable `choicetab' `cellmargin'
-		put`doc' table text(1,1) = table(text_inside)
-	*/
-
-
-	* Re-load survey data
+**** Word Document *************************************************************
+if "`file'" == "docx" { 						// Begin putdocx if statement
+//	Re-load survey data
 	qui use `survey', clear
 
 	* Replace varnumber as name if option novarnum is specified
 	qui if "`varnum'" == "novarnum" replace varnumber = name if !inlist(type,"end group","end repeat")
-
-
-
 	sort sort
-	* Create Main Table
-	putdocx table surveytable = (`rows',`columns'), border(all,single,`g_5')
+
+//	Local macros for styles used in putdocx
+	* Greys
+	local g_1 222222
+	local g_2 4a4a4a
+	local g_3 978d85
+	local g_4 dddddd
+	local g_5 f9f9f9
+	
+	* Colors
+	local c_1 	00356b	// 	Yale Blue
+	local c_2	286dc0	//	Yale Medium Blue
+	local c_3	63aaff	//	Yale Light Blue
+	local c_4	5f712d	//	Yale Green
+	local c_5	bd5319	//	Yale Orange
+
+	* Create local macros for each heading level and font style for the table
+	local nametext 			`"font(Calibri,8,"`g_1'") italic"'
+	local relevancetext 	`"font(Calibri,8,"`g_3'") italic"'
+	local endtext 			`"font("Calibri Light",8,"`g_4'") bold italic"'
+	local labeltext			`"font(Calibri,10)"'
+	local hinttext			`"font(Calibri,8,"`g_3'") italic"'
+	local choicetab 		"layout(autofitcontents) cellmargin(right,0pt)"
+
+//	Begin document
+	putdocx clear
+	putdocx begin, `pagesize' `labeltext' footer(main)
+	
+	* Title and Subtitle
+	putdocx paragraph, 	style(Title)
+		putdocx text ("`title'")
+	putdocx paragraph, 	style(Subtitle)
+		putdocx text ("`subtitle'")
+	
+	* Add page numbers
+	putdocx paragraph, tofooter(main) halign(center)
+	putdocx pagenumber
+
+//	Loop through all rows in dataset and write contents to file
 	forvalues i = 1/`rows' {
-		if "`split'" == "" putdocx table surveytable(`i',.), nosplit
+		** Group Headings
 		if type[`i'] == "begin group" | type[`i'] == "begin repeat" {
 			local h = heading[`i']
 			if heading[`i'] == 1 local append append
-			else local append ""
+				else local append ""
 			if type[`i'] == "begin repeat" local repeat " (Repeat Group)"
-			else local repeat ""
+				else local repeat ""
 			local label = label`language'[`i']
 			local module = module[`i']
-			local heading = "h" + strofreal(heading[`i'])
+			local heading = "Heading" + strofreal(heading[`i'])
 			if !missing(relevance[`i']) local linebreak linebreak
-			else local linebreak ""
+				else local linebreak ""
+				
+			if heading[`i'] == 1 putdocx sectionbreak
 
-			if heading[`i'] == 1 putdocx table surveytable(`i',1) = (""), `nametext' border(start,nil) border(end,nil) linebreak
-			putdocx table surveytable(`i',1) = ("`module' - `label'`repeat'"), colspan(`columns') ``heading'' `append' `linebreak'
-			if !missing(relevance[`i']) putdocx table surveytable(`i',1) = (relevance[`i']), append `relevancetext'
-
-			}
+			putdocx paragraph, style(`heading')
+			putdocx text ("`module' - `label'`repeat'"), `linebreak'
+			putdocx paragraph
+			putdocx text (relevance[`i']), `relevancetext'
+				
+		}
 		else if type[`i'] == "end group" |  type[`i'] == "end repeat" {
 			qui sum row if name == name[`i']
 			local label = label`language'[`r(min)']
@@ -487,66 +440,27 @@ program define cto2file
 			if type[`i'] == "end repeat" local repeat "Repeat "
 			else local repeat ""
 
-			putdocx table surveytable(`i',1) = ("	End `repeat'Group: `module' - `label'"), colspan(`columns') `endtext' halign(right)
-
+			putdocx paragraph,  halign(right)
+			putdocx text ("	End `repeat'Group: `module' - `label'"),  `endtext'
+			*putdocx table surveytable(`i',1) = ("	End `repeat'Group: `module' - `label'"), colspan(`columns') `endtext' halign(right)
 		}
-		else if type[`i'] == "note" {
-			putdocx table surveytable(`i',1) = (varnumber[`i']), font("",10)
-			if "`varnum'" != "novarnum"	{
-				putdocx table surveytable(`i',2) = (name[`i']), colspan(`nspan') `nametext' linebreak
-				if !missing(relevance[`i']) 		putdocx table surveytable(`i',2) = (relevance[`i']), `relevancetext' append linebreak
-				}
-			else {
-				putdocx table surveytable(`i',2) = (""), colspan(`nspan') `nametext'
-				if !missing(relevance[`i']) 		putdocx table surveytable(`i',2) = (relevance[`i']), `relevancetext' append linebreak
-			}
-
-			foreach x of varlist lblsgmt* {
-				if !missing(`x'[`i']){
-					local segnum = real(subinstr("`x'","lblsgmt","",.))
-					local next = `segnum'+1
-					cap confirm variable lblsgmt`next'
-					if _rc == 0 {
-						if !missing(lblsgmt`next'[`i']) local linebreak linebreak(2)
-						else if !missing(hintsgmt1[`i']) local linebreak linebreak
-						else local linebreak ""
-					}
-				else if !missing(hintsgmt1[`i']) local linebreak linebreak
-				else local linebreak ""
-				putdocx table surveytable(`i',2) = (`x'[`i']), `labeltext' append `linebreak'
-				}
-			}
-			foreach x of varlist hintsgmt* {
-				if !missing(`x'[`i']) {
-					local segnum = real(subinstr("`x'","hintsgmt","",.))
-					local next = `segnum'+1
-					cap confirm variable hintsgmt`next'
-					if _rc == 0 {
-						if !missing(hintsgmt`next'[`i']) local linebreak linebreak
-						else local linebreak ""
-					}
-				else local linebreak ""
-				putdocx table surveytable(`i',2) = (`x'[`i']), `hinttext' append `linebreak'
-				}
-			}
-		}
+		
+		** Notes and Question Text
 		else {
-			putdocx table surveytable(`i',1) = (varnumber[`i']), font("",10)
-				if !missing(relevance[`i']) | !missing(lblsgmt1[`i']) | !missing(hintsgmt1[`i']) local linebreak linebreak
-				else local linebreak ""
-			if "`varnum'" != "novarnum"	{
-				putdocx table surveytable(`i',2) = (name[`i']), `nametext' colspan(`lspan') `linebreak'
-				if !missing(lblsgmt1[`i']) | !missing(hintsgmt1[`i']) local linebreak linebreak
-				else local linebreak ""
-				}
-			else {
-				putdocx table surveytable(`i',2) = (""), `nametext' colspan(`lspan')
-				if !missing(lblsgmt1[`i']) | !missing(hintsgmt1[`i']) local linebreak linebreak
-				else local linebreak ""
+			* Special Option Text
+			if !inlist(type[`i'],"begin_group","end_group","begin_repeat","end_repeat") & !inlist(type[`i'],"text","integer","decimal","date","datetime","note","calculate","calculate_here") & !inlist(type1[`i'],"select_one","select_multiple") {
+				local special = "[" + type[`i'] + "] "
 			}
-
-			if !missing(relevance[`i']) putdocx table surveytable(`i',2) = (relevance[`i']), `relevancetext' append `linebreak'
-
+			else local special ""			
+			
+			* Label text
+			if type[`i'] == "note" {
+					putdocx paragraph, halign(left)
+					putdocx text (""), linebreak
+			}
+			else putdocx paragraph, halign(left) indent(hanging,25pt)
+			
+			putdocx text (cond(type[`i'] != "note",varnumber[`i']+". `special'","") ), `labeltext'
 			foreach x of varlist lblsgmt* {
 				if !missing(`x'[`i']){
 					local segnum = real(subinstr("`x'","lblsgmt","",.))
@@ -557,11 +471,13 @@ program define cto2file
 						else if !missing(hintsgmt1[`i']) local linebreak linebreak
 						else local linebreak ""
 					}
-				else if !missing(hintsgmt1[`i']) local linebreak linebreak
-				else local linebreak ""
-				putdocx table surveytable(`i',2) = (`x'[`i']), `labeltext' append `linebreak'
+					else if !missing(hintsgmt1[`i']) local linebreak linebreak
+					else local linebreak ""
+					putdocx text (`x'[`i'] ), `labeltext' `linebreak'
 				}
 			}
+			
+			* Hint Text
 			foreach x of varlist hintsgmt* {
 				if !missing(`x'[`i']) {
 					local segnum = real(subinstr("`x'","hintsgmt","",.))
@@ -572,56 +488,397 @@ program define cto2file
 						else local linebreak ""
 					}
 					else local linebreak ""
-					putdocx table surveytable(`i',2) = (`x'[`i']), `hinttext' append `linebreak'
+					putdocx text (`x'[`i']), `hinttext' `linebreak'
 				}
 			}
+		}
+		
+		** Response Options
+		* Calculations
+		if inlist(type[`i'],"calculate","calculate_here") {
+				putdocx paragraph, halign(left) indent(left,25pt)
+				putdocx text ("Calculated Value"), `nametext'	
+		}
+		
+		* Select One/Multiple
+		else if type1[`i'] == "select_one" | type1[`i'] == "select_multiple"	{
+			if type1[`i'] == "select_multiple" {
+				putdocx paragraph, halign(left) indent(left,25pt)
+				putdocx text ("Select all that apply:"), `text' italic
+			}
+			local tname = name[`i']
+			local table = type2[`i']
+			putdocx table `tname' = mata(`table'), indent(40pt) border(all, nil) `choicetab'
+			}
+		
+		* Text Input
+		else if type[`i'] == "text" {
+			local tname = name[`i']
+			putdocx table `tname' = mata(text), width(2in) indent(40pt) border(all,nil) border(bottom,thick,`g_2')
+			}
+		
+		* Interger Input
+		else if type[`i'] == "integer" {
+			local tblname = name[`i'] + "_int"
+			local columns_pre = columns_pre[`i']
+			if `columns_pre' == . local columns_pre = `intlength'
+			putdocx table `tblname' = (1,`columns_pre'), border(all,single,`gs_2') border(top,nil) layout(autofitcontents) indent(40pt)
+			}
+		
+		* Decimal Input
+		else if type[`i'] == "decimal" {
+			local tblname = name[`i'] + "_dec"
+			local columns_pre = columns_pre[`i']
+			if `columns_pre' == . local columns_pre = `intlength'
+			local columns_post = columns_post[`i']
+			if `columns_post' == . local columns_post = `declength'
+			local totalcolumns_dec = `columns_pre' + `columns_post' + 1
+			local decimalpoint = `columns_pre' + 1
+			putdocx table `tblname' = (1,`totalcolumns_dec'), border(all,single,`gs_2') border(top,nil) layout(autofitcontents) indent(40pt)
+				putdocx table `tblname'(1,`decimalpoint') = ("."), border(top,nil) border(bottom,nil)
+			}		
 
-			if type[`i'] == "calculate" 		putdocx table surveytable(`i',3) = ("Calculated Value"), `nametext' colspan(`rspan')
-
-			else if type1[`i'] == "select_one" | type1[`i'] == "select_multiple"	{
-				local table = type2[`i']
-				if type1[`i'] == "select_one" local select "Select One:"
-				else local select "Select All That Apply:"
-
-				putdocx table surveytable(`i',3) = ("`select'"), `text' italic colspan(`rspan')
-				putdocx table surveytable(`i',3) = table(`table'), append
-				}
-
-			else if type[`i'] == "text" {
-				putdocx table surveytable(`i',3) = table(text), colspan(`rspan') valign(bottom)
-				putdocx table surveytable(`i',3), append
-				}
-
-			else if type[`i'] == "integer" {
-				local tblname = name[`i'] + "_int"
-				local columns_pre = columns_pre[`i']
-				if `columns_pre' == . local columns_pre = `intlength'
-				putdocx table `tblname' = (1,`columns_pre'), border(all,single,`gs_2') border(top,nil) memtable layout(autofitcontents)
-				putdocx table surveytable(`i',3) = table(`tblname'), colspan(`rspan') valign(center) halign(center)
-				}
-
-			else if type[`i'] == "decimal" {
-				local tblname = name[`i'] + "_dec"
-				local columns_pre = columns_pre[`i']
-				if `columns_pre' == . local columns_pre = `intlength'
-				local columns_post = columns_post[`i']
-				if `columns_post' == . local columns_post = `declength'
-				local totalcolumns_dec = `columns_pre' + `columns_post' + 1
-				local decimalpoint = `columns_pre' + 1
-				putdocx table `tblname' = (1,`totalcolumns_dec'), border(all,single,`gs_2') border(top,nil) memtable layout(autofitcontents)
-					putdocx table `tblname'(1,`decimalpoint') = ("."), border(top,nil) border(bottom,nil)
-				putdocx table surveytable(`i',3) = table(`tblname'), colspan(`rspan') valign(center) halign(center)
-				}
-
-			else putdocx table surveytable(`i',3), colspan(`rspan')
+		* Date
+		else if type[`i'] == "date" {
+			local tname = name[`i']
+			putdocx table `tname' = (1,10), border(all,single,`gs_2') border(top,nil) width(0.5in) indent(40pt)
+			putdocx table `tname'(1,1) = ("d"), border(top,nil) font(, , lightgray)
+			putdocx table `tname'(1,2) = ("d"), border(top,nil) font(, , lightgray)
+			putdocx table `tname'(1,3) = ("/"), border(top,nil) border(bottom,nil)
+			putdocx table `tname'(1,4) = ("m"), border(top,nil) font(, , lightgray)
+			putdocx table `tname'(1,5) = ("m"), border(top,nil) font(, , lightgray)
+			putdocx table `tname'(1,6) = ("/"), border(top,nil) border(bottom,nil)
+			putdocx table `tname'(1,7) = ("y"), border(top,nil) font(, , lightgray)
+			putdocx table `tname'(1,8) = ("y"), border(top,nil) font(, , lightgray)
+			putdocx table `tname'(1,9) = ("y"), border(top,nil) font(, , lightgray)
+			putdocx table `tname'(1,10) = ("y"), border(top,nil) font(, , lightgray)
+		}
+		
+		* Date-time
+		else if type[`i'] == "datetime" {
+			local tname = name[`i']
+			putdocx table `tname' = (1,19), border(all,single,`gs_2') border(top,nil) width(0.5in) indent(40pt)
+			putdocx table `tname'(1,1) = ("d"), border(top,nil) font(, , lightgray)
+			putdocx table `tname'(1,2) = ("d"), border(top,nil) font(, , lightgray)
+			putdocx table `tname'(1,3) = ("/"), border(top,nil) border(bottom,nil)
+			putdocx table `tname'(1,4) = ("m"), border(top,nil) font(, , lightgray)
+			putdocx table `tname'(1,5) = ("m"), border(top,nil) font(, , lightgray)
+			putdocx table `tname'(1,6) = ("/"), border(top,nil) border(bottom,nil)
+			putdocx table `tname'(1,7) = ("y"), border(top,nil) font(, , lightgray)
+			putdocx table `tname'(1,8) = ("y"), border(top,nil) font(, , lightgray)
+			putdocx table `tname'(1,9) = ("y"), border(top,nil) font(, , lightgray)
+			putdocx table `tname'(1,10) = ("y"), border(top,nil) font(, , lightgray)
+			putdocx table `tname'(1,11) = ("-"), border(top,nil) border(bottom,nil)
+			putdocx table `tname'(1,12) = ("h"), border(top,nil) font(, , lightgray)
+			putdocx table `tname'(1,13) = ("h"), border(top,nil) font(, , lightgray)
+			putdocx table `tname'(1,14) = (":"), border(top,nil) border(bottom,nil)
+			putdocx table `tname'(1,15) = ("m"), border(top,nil) font(, , lightgray)
+			putdocx table `tname'(1,16) = ("m"), border(top,nil) font(, , lightgray)
+			putdocx table `tname'(1,17) = (":"), border(top,nil) border(bottom,nil)
+			putdocx table `tname'(1,18) = ("s"), border(top,nil) font(, , lightgray)
+			putdocx table `tname'(1,19) = ("s"), border(top,nil) font(, , lightgray)
 		}
 
-	}
+		
+		
+	} // End row loop
 
-
-
-	put`doc' save "`save'", replace
+	putdocx save "`save'", replace
 	di as text "Document saved as " as result `"`save'"'
-	*
 	sort sort
+	
+}													// End putdocx if statement
+	
+	
+**** Excel Sheet ***************************************************************
+if "`file'" == "xlsx" { 						// Begin putexcel if statement
+
+//	Re-load survey data
+qui {
+	gen lsort = _n
+	gen type2 = list_name
+	gen choicelabel = label`language'
+	keep type2 value choicelabel lsort
+	drop if value == "."
+	set obs `=_N+1'
+	replace value = "." in `=_N'
+	tempfile choices
+	save `choices'
+	
+	qui use `survey', clear
+	joinby type2 using `choices'
+
+	* Replace varnumber as name if option novarnum is specified
+	qui if "`varnum'" == "novarnum" replace varnumber = name if !inlist(type,"end group","end repeat")
+	sort sort lsort	
+}
+//	Local macros for styles used in putexcel
+	* Greys
+	local g_1 034 034 034
+	local g_2 074 074 074
+	local g_3 151 141 133
+	local g_4 221 221 221
+	local g_5 249 249 249
+	
+	* Colors
+	local c_1 	000 053 107	// 	Yale Blue
+	local c_2	040 109 192	//	Yale Medium Blue
+	local c_3	099 170 255	//	Yale Light Blue
+	local c_4	095 113 045	//	Yale Green
+	local c_5	189 083 025	//	Yale Orange
+
+	* Create local macros for each heading level and font style for the table
+	local titletext			`"font("Calibri Light",28,"white")"'
+	local subtitletext		`"font(Calibri,11,"white")"'
+	local nametext 			`"font(Calibri,8,"`g_1'") italic"'
+	local relevancetext 	`"font(Calibri,8,"`g_3'") italic"'
+	local endtext 			`"font("Calibri Light",8,"`g_2'") bold italic border(top,medium,"`c_1'")"'
+	local labeltext			`"font(Calibri,10)"'
+	local hinttext			`"font(Calibri,8,"`g_3'") italic"'
+	local choicetab 		"layout(autofitcontents) cellmargin(right,0pt)"
+	local h1 				`"font("Calibri Light",16,white) fpattern(solid,"`c_2'") border(bottom,medium,"`c_1'") "'
+	local h2 				`"font("Calibri Light",13,"`c_2'") fpattern(solid,"`g_4'")"'
+	local h3 				`"font("Calibri Light",12,"`c_2'") fpattern(solid,"`g_5'")"'
+	local h4 				`"font("Calibri Light",11,"`c_4'") bold"'
+	local h5 				`"font("Calibri Light",11,"`c_4'")"'
+	local h6 				`"font("Calibri Light",11,"`c_5'") italic"'
+	local h6 				`"font("Calibri Light",10,"`c_5'") italic"'
+	local h7 				`"font("Calibri Light",9,"`c_5'") italic"'
+	local h8 				`"font("Calibri Light",8,"`c_5'") italic"'
+	local h9 				`"font("Calibri Light",7,"`c_5'") italic"'
+
+	
+	
+//	Write mock dataset using stata data
+qui {
+	foreach x in A B C D {
+		cap drop `x'
+		gen `x' = ""
+	}
+	bysort sort (lsort): replace A = varnumber if _n == 1 & type != "note"
+	bysort sort (lsort): replace B = label`language' + cond(!mi(hint`language'),"`=char(10)'" + hint`language',"") if _n == 1
+	replace B = module + " - " + label`language' + cond(type=="begin repeat"," (Repeat Group)","") if inlist(type,"begin group","begin repeat")
+	bysort name (sort lsort): replace B = "End " + cond(type=="end repeat","Repeat ","") + "Group: " + module[1] + " - " + label`language'[1] if inlist(type,"end group","end repeat")
+	sort sort lsort
+	replace C = "Calculated Value" 							if inlist(type,"calculate","calculate_here")
+	replace C = "___________________" 						if type == "text"
+	replace C = "|_|_|_|_|_|" 								if type == "integer"
+	replace C = "|_|_|_|_|_|.|_|_|" 						if type == "decimal"
+	replace C = "|_|_|/|_|_|/|_|_|_|_|"						if type == "date"
+	replace C = "|_|_|/|_|_|/|_|_|_|_| - |_|_|:|_|_|:|_|_|" if type == "datetime"
+	replace C = value 										if inlist(type1,"select_one","select_multiple")
+	replace D = choicelabel									if inlist(type1,"select_one","select_multiple")
+
+	sort sort lsort
+	gen n = _n
+	set obs `=_N+1'
+	replace A = "`title'" in `=_N'
+	replace n = -2 in `=_N'
+	set obs `=_N+1'
+	replace A = "`subtitle'" in `=_N'
+	replace n = -1 in `=_N'
+	sort n
+	gen rownum = _n
+}
+	export excel A B C D using "`save'", replace
+	
+//	Format Rows
+	qui putexcel clear
+	putexcel set "`save'", open modify
+	
+	* Start with Plain white, no borders
+	qui putexcel B1:D`c(N)' , overwritefmt fpattern(solid,white) left top
+	
+	* Title/Subtitle
+	qui putexcel (A1:D1) , overwritefmt merge fpattern(solid,"`c_1'") `titletext' txtindent(5)
+	qui putexcel (A2:D2) , overwritefmt merge fpattern(solid,"`c_1'") `subtitletext' txtindent(5)
+	
+	* Left sidebar
+	qui putexcel A3:A`c(N)' , overwritefmt fpattern(solid,"`c_3'") font(Calibri,12,white) left top
+	
+	* Headings
+	qui levelsof name if inlist(type,"begin group","begin repeat"), local(names)
+	foreach name of local names {		
+		qui sum rownum if name == "`name'"
+		local r = `r(min)'
+		local s = `r(max)'
+		local heading = "h" + string(heading[`r'])
+		if heading[`r'] == 1 qui putexcel A`r', 		overwritefmt  	   ``heading'' left top
+		qui putexcel B`r':D`r', overwritefmt merge ``heading'' left top
+		qui putexcel B`s':D`s', overwritefmt merge  `endtext' right top
+		if heading[`r'] == 1  qui putexcel A`s', 		overwritefmt 		`endtext' right top
+	}
+	
+	* Top border between questions
+	qui levelsof name if !inlist(type,"begin group","begin repeat","end group","end repeat"), local(names)
+	foreach name of local names {		
+		qui sum rownum if name == "`name'"
+		local r = `r(min)'
+		local s = `r(max)'
+		qui putexcel B`r':D`r', overwritefmt border(top,thin,"`c_2'") left top
+		qui putexcel A`r', overwritefmt fpattern(solid,"`c_3'") font(Calibri,12,white) left top border(top,thin,"`c_2'")
+	}
+	
+	* Merge cells for select_one/select_multiple questions
+	qui levelsof name if inlist(type1,"select_one","select_multiple"), local(names)
+	foreach name of local names {		
+		qui sum rownum if name == "`name'"
+		local r = `r(min)'
+		local s = `r(max)'
+		qui putexcel B`r':B`s', overwritefmt merge border(top,thin,"`c_2'") left top
+	}
+	
+// 	* Merge C and D for non select variables
+// 	qui levelsof name if !inlist(type1,"select_one","select_multiple") & !inlist(type,"begin group","begin repeat","end group","end repeat"), local(names)
+// 	foreach name of local names {		
+// 		qui sum rownum if name == "`name'"
+// 		local r = `r(min)'
+// 		local s = `r(max)'
+// 		*qui putexcel C`r':D`r', overwritefmt merge border(top,thin,"`c_2'") left vcenter
+// 	}
+//	
+// 	* Merge notes across
+// 	qui levelsof name if inlist(type,"note"), local(names)
+// 	foreach name of local names {		
+// 		qui sum rownum if name == "`name'"
+// 		local r = `r(min)'
+// 		local s = `r(max)'
+// 		*qui putexcel B`r':D`r', overwritefmt merge border(top,thin,"`c_2'") left top
+// 	}
+	
+
+	
+	putexcel save
+	di as result _n "File `save' saved."
+
+	
+	
+// //	Begin document
+// 	qui putexcel clear
+// 	qui putexcel set "`save'", replace
+//	
+// 	* Title and Subtitle
+// 	qui putexcel A1:G1 = "`title'", merge fpattern(solid,"`c_1'") `titletext' shrinkfit txtindent(5)
+// 	qui putexcel A2:G2 = "`subtitle'", merge fpattern(solid,"`c_1'") `subtitletext' txtindent(5)
+//		
+//
+// //	Loop through all rows in dataset and write contents to file
+// 	local r = 3
+// 	forvalues i = 1/`rows' {
+// 		if `i' == 1 _dots 0, title(Writing rows to Excel file) reps(`rows')
+// 		_dots `i' 0
+//		
+// 		** Group Headings
+// 		if type[`i'] == "begin group" | type[`i'] == "begin repeat" {
+// 			qui putexcel A`r' = " ", fpattern(solid,"`c_3'") font(Calibri,12,white)
+// 			local h = heading[`i']
+// 			if type[`i'] == "begin repeat" local repeat " (Repeat Group)"
+// 				else local repeat ""
+// 			local label = label`language'[`i']
+// 			local module = module[`i']
+// 			local heading  `h`h''
+// 			qui putexcel B`r':G`r' =  "`module' - `label'`repeat'", merge `heading' left top
+// 			local++r
+//				
+// 		}
+// 		else if type[`i'] == "end group" |  type[`i'] == "end repeat" {
+// 			qui putexcel A`r' = " ", fpattern(solid,"`c_3'") font(Calibri,12,white)
+// 			qui sum row if name == name[`i']
+// 			local label = label`language'[`r(min)']
+// 			local module = module[`r(min)']
+// 			if type[`i'] == "end repeat" local repeat "Repeat "
+// 			else local repeat ""
+// 			qui putexcel B`r':G`r' = "	End `repeat'Group: `module' - `label'",  merge `endtext' right top
+// 			local++r
+// 		}
+//		
+// 		** Notes and Question Text
+// 		else if type1[`i'] != "select_one" & type1[`i'] != "select_multiple" {
+// 			* Special Option Text
+// 			if !inlist(type[`i'],"begin_group","end_group","begin_repeat","end_repeat") & !inlist(type[`i'],"text","integer","decimal","date","datetime","note","calculate","calculate_here") & !inlist(type1[`i'],"select_one","select_multiple") {
+// 				local special = "[" + type[`i'] + "] "
+// 			}
+// 			else local special ""			
+//			
+// 			* Label + Hint Text
+// 			qui putexcel A`r' = (cond(type[`i'] != "note",varnumber[`i']," ")), fpattern(solid,"`c_3'") font(Calibri,12,white)
+// 			if type[`i'] == "note" local col G
+// 			else local col E
+// 			qui putexcel B`r':`col'`r' = (label`language'[`i'] + cond(!mi(hint`language'[`i']),"`=char(10)'" + hint`language'[`i'],"")) , merge border(top,thin,"`c_2'") txtwrap left top
+// 			local++r
+//			
+// 		}
+//		
+// 		** Response Options
+// 		* Calculations
+// 		if inlist(type[`i'],"calculate","calculate_here") {
+// 				local r = `r' - 1
+// 				qui putexcel F`r':G`r' = "Calculated Value", merge italic border(top,thin,"`c_2'") txtwrap left top
+// 				local++r
+// 		}
+//		
+// 		* Select One/Multiple
+// 		else if type1[`i'] == "select_one" | type1[`i'] == "select_multiple"	{
+// 			local table = type2[`i']
+// 			mata: st_local("mrows",strofreal(rows(`table')))
+// 			local s = `r' + `mrows' - 1
+// 			qui putexcel A`r':A`s' = (cond(type[`i'] != "note",varnumber[`i']," ")), merge fpattern(solid,"`c_3'") font(Calibri,12,white) left top
+// 			qui putexcel B`r':E`s' = (label`language'[`i'] + cond(!mi(hint`language'[`i']),"`=char(10)'" + hint`language'[`i'],"") + cond(type1[`i'] == "select_multiple","`=char(10)'"+"`=char(10)'"+"Select all that apply:","`=char(10)'"+"`=char(10)'"+"Select all that apply:") ) , merge border(top,thin,"`c_2'") txtwrap left top
+// 			getmata (value choicelabel)=`table', replace force
+// 			qui export excel value choicelabel using "`save'" in 1/`mrows', cell(F`r') sheet("Sheet1", modify)
+// 			drop value choicelabel 
+// 			local r = `r' + `mrows'
+// 		}
+//
+//
+// // 			if type1[`i'] == "select_multiple" {
+// // 				putdocx paragraph, halign(left) indent(left,25pt)
+// // 				putdocx text ("Select all that apply:"), `text' italic
+// // 			}
+// // 			local tname = name[`i']
+// // 			local table = type2[`i']
+// // 			putdocx table `tname' = mata(`table'), indent(40pt) border(all, nil) `choicetab'
+//
+// 		* Text Input
+// 		else if type[`i'] == "text" {
+// 				local r = `r' - 1
+// 				qui putexcel F`r':G`r' = "___________________", merge border(top,thin,"`c_2'") txtwrap left top
+// 				local++r
+// 			}
+//		
+// 		* Interger Input
+// 		else if type[`i'] == "integer" {
+// 				local r = `r' - 1
+// 				qui putexcel F`r':G`r' = "|_|_|_|_|_|", merge border(top,thin,"`c_2'") txtwrap left top
+// 				local++r
+// 			}
+//		
+// 		* Decimal Input
+// 		else if type[`i'] == "decimal" {
+// 				local r = `r' - 1
+// 				qui putexcel F`r':G`r' = "|_|_|_|_|_|.|_|_|", merge border(top,thin,"`c_2'") txtwrap left top
+// 				local++r
+// 			}		
+//
+// 		* Date
+// 		else if type[`i'] == "date" {
+// 				local r = `r' - 1
+// 				qui putexcel F`r':G`r' = "|_|_|/|_|_|/|_|_|_|_|", merge border(top,thin,"`c_2'") txtwrap left top
+// 				local++r
+// 		}
+//		
+// 		* Date-time
+// 		else if type[`i'] == "datetime" {
+// 				local r = `r' - 1
+// 				qui putexcel F`r':G`r' = "|_|_|/|_|_|/|_|_|_|_| - |_|_|:|_|_|:|_|_|", merge border(top,thin,"`c_2'") txtwrap left top
+// 				local++r
+// 		}		
+//		
+// 	} // End row loop
+//
+//	
+	
+	
+} 												// End putexcel if statement
+	
 end
