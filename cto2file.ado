@@ -216,6 +216,8 @@ program define cto2file
 
 	* Replace "$" and "{" or "}" with [ ]
 	foreach x in label hint {
+		qui cap tostring `x'`language', replace
+		qui replace `x'`language' = "" if `x'`language' == "."
 		qui replace `x'`language' = subinstr(`x'`language',"$","",.)
 		qui replace `x'`language' = subinstr(`x'`language',"{","[",.)
 		qui replace `x'`language' = subinstr(`x'`language',"}","]",.)
@@ -231,8 +233,13 @@ program define cto2file
 	qui replace label`language' = subinstr(label`language',"`=char(10)'`=char(10)'","`=char(10)'",.)	// Collapse all spaces to one
 	qui replace hint`language' = subinstr(hint`language',"`=char(10)'`=char(10)'","`=char(10)'",.)	// Collapse all spaces to one
 
-	qui split label`language', parse("`=char(10)'") gen(lblsgmt)
-	qui split hint`language', parse("`=char(10)'") gen(hintsgmt)
+	qui count if label`language' != ""
+	if `r(N)' > 0 qui split label`language', parse("`=char(10)'") gen(lblsgmt)
+	else gen lblsgmt1 = label`language'
+	
+	qui count if hint`language' != ""
+	if `r(N)' > 0 qui split hint`language', parse("`=char(10)'") gen(hintsgmt)
+	else gen hintsgmt1 = hint`language'
 
 	* Replace double quote with single quotes
 	qui replace label`language' = subinstr(label`language',`"""',"`=char(39)'",.)
@@ -381,6 +388,7 @@ program define cto2file
 	local nspan = `columns' - 1
 
 	* Begin document
+	put`doc' clear
 	put`doc' begin, `pagesize' `labeltext'
 	put`doc' paragraph, 	`titletext'
 		put`doc' text ("`title'")
