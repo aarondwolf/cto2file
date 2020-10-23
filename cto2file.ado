@@ -89,6 +89,7 @@ program define cto2file
 	foreach x in `command' {
 		`x'
 	}
+	
 
 	* Remove all leading and trailing blanks from string variables
 	qui ds, has(type string)
@@ -260,6 +261,8 @@ program define cto2file
 
 	* Create variable for number of columns before and after decimal (based on constraint)
 	quietly {
+	cap assert mi(constraint)
+	if _rc != 0 { // begin constraint if
 		gen constraint_orig = constraint
 		replace constraint = "" if !inlist(type,"integer","decimal")
 		gen length = strlen(constraint)
@@ -296,10 +299,15 @@ program define cto2file
 		egen columns_pre = rowmax(min_predec max_predec)
 		egen columns_post = rowmax(min_postdec max_postdec)
 		replace columns_pre = 5 if inlist(type,"integer","decimal") & missing(columns_pre) & missing(columns_post)
-		replace columns_pre = 2 if inlist(type,"integer","decimal") & missing(columns_pre) & missing(columns_post)
+		replace columns_post = 2 if inlist(type,"integer","decimal") & missing(columns_pre) & missing(columns_post)
 		drop length con_* min_* max_* constraint
 		rename constraint_orig constraint
-	}
+	}	// End contraint if
+	else { // Begin constraing else
+		gen columns_pre = 5 if inlist(type,"integer","decimal") 
+		gen columns_post = 2 if inlist(type,"integer","decimal")
+	} // End constraing else
+	} // End quietly
 	* Generate row number
 	sort sort
 	qui gen row = _n
@@ -609,7 +617,7 @@ qui {
 	joinby type2 using `choices'
 
 	* Replace varnumber as name if option novarnum is specified
-	qui if "`varnum'" == "novarnum" replace varnumber = name if !inlist(type,"end group","end repeat")
+	qui if "`varnum'" == "novarnum" replace varnumber = name if !inlist(type,"begin group","begin repeat","end group","end repeat")
 	sort sort lsort	
 }
 //	Local macros for styles used in putexcel
@@ -660,12 +668,12 @@ qui {
 	replace B = module + " - " + label`language' + cond(type=="begin repeat"," (Repeat Group)","") if inlist(type,"begin group","begin repeat")
 	bysort name (sort lsort): replace B = "End " + cond(type=="end repeat","Repeat ","") + "Group: " + module[1] + " - " + label`language'[1] if inlist(type,"end group","end repeat")
 	sort sort lsort
-	replace C = "Calculated Value" 							if inlist(type,"calculate","calculate_here")
-	replace C = "___________________" 						if type == "text"
-	replace C = "|_|_|_|_|_|" 								if type == "integer"
-	replace C = "|_|_|_|_|_|.|_|_|" 						if type == "decimal"
-	replace C = "|_|_|/|_|_|/|_|_|_|_|"						if type == "date"
-	replace C = "|_|_|/|_|_|/|_|_|_|_| - |_|_|:|_|_|:|_|_|" if type == "datetime"
+	replace D = "Calculated Value" 							if inlist(type,"calculate","calculate_here")
+	replace D = "___________________" 						if type == "text"
+	replace D = "|_|_|_|_|_|" 								if type == "integer"
+	replace D = "|_|_|_|_|_|.|_|_|" 						if type == "decimal"
+	replace D = "|_|_|/|_|_|/|_|_|_|_|"						if type == "date"
+	replace D = "|_|_|/|_|_|/|_|_|_|_| - |_|_|:|_|_|:|_|_|" if type == "datetime"
 	replace C = value 										if inlist(type1,"select_one","select_multiple")
 	replace D = choicelabel									if inlist(type1,"select_one","select_multiple")
 
@@ -680,11 +688,11 @@ qui {
 	sort n
 	gen rownum = _n
 }
-	export excel A B C D using "`save'", replace
+	qui export excel A B C D using "`save'", replace
 	
 //	Format Rows
 	qui putexcel clear
-	putexcel set "`save'", open modify
+	qui putexcel set "`save'", open modify
 	
 	* Start with Plain white, no borders
 	qui putexcel B1:D`c(N)' , overwritefmt fpattern(solid,white) left top
@@ -737,146 +745,18 @@ qui {
 // 		*qui putexcel C`r':D`r', overwritefmt merge border(top,thin,"`c_2'") left vcenter
 // 	}
 //	
-// 	* Merge notes across
-// 	qui levelsof name if inlist(type,"note"), local(names)
-// 	foreach name of local names {		
-// 		qui sum rownum if name == "`name'"
-// 		local r = `r(min)'
-// 		local s = `r(max)'
-// 		*qui putexcel B`r':D`r', overwritefmt merge border(top,thin,"`c_2'") left top
-// 	}
+	* Merge notes across
+	qui levelsof name if inlist(type,"note"), local(names)
+	foreach name of local names {		
+		qui sum rownum if name == "`name'"
+		local r = `r(min)'
+		local s = `r(max)'
+		qui putexcel B`r':D`r', overwritefmt merge border(top,thin,"`c_2'") left top
+	}
 	
 
 	
 	putexcel save
-	di as result _n "File `save' saved."
-
-	
-	
-// //	Begin document
-// 	qui putexcel clear
-// 	qui putexcel set "`save'", replace
-//	
-// 	* Title and Subtitle
-// 	qui putexcel A1:G1 = "`title'", merge fpattern(solid,"`c_1'") `titletext' shrinkfit txtindent(5)
-// 	qui putexcel A2:G2 = "`subtitle'", merge fpattern(solid,"`c_1'") `subtitletext' txtindent(5)
-//		
-//
-// //	Loop through all rows in dataset and write contents to file
-// 	local r = 3
-// 	forvalues i = 1/`rows' {
-// 		if `i' == 1 _dots 0, title(Writing rows to Excel file) reps(`rows')
-// 		_dots `i' 0
-//		
-// 		** Group Headings
-// 		if type[`i'] == "begin group" | type[`i'] == "begin repeat" {
-// 			qui putexcel A`r' = " ", fpattern(solid,"`c_3'") font(Calibri,12,white)
-// 			local h = heading[`i']
-// 			if type[`i'] == "begin repeat" local repeat " (Repeat Group)"
-// 				else local repeat ""
-// 			local label = label`language'[`i']
-// 			local module = module[`i']
-// 			local heading  `h`h''
-// 			qui putexcel B`r':G`r' =  "`module' - `label'`repeat'", merge `heading' left top
-// 			local++r
-//				
-// 		}
-// 		else if type[`i'] == "end group" |  type[`i'] == "end repeat" {
-// 			qui putexcel A`r' = " ", fpattern(solid,"`c_3'") font(Calibri,12,white)
-// 			qui sum row if name == name[`i']
-// 			local label = label`language'[`r(min)']
-// 			local module = module[`r(min)']
-// 			if type[`i'] == "end repeat" local repeat "Repeat "
-// 			else local repeat ""
-// 			qui putexcel B`r':G`r' = "	End `repeat'Group: `module' - `label'",  merge `endtext' right top
-// 			local++r
-// 		}
-//		
-// 		** Notes and Question Text
-// 		else if type1[`i'] != "select_one" & type1[`i'] != "select_multiple" {
-// 			* Special Option Text
-// 			if !inlist(type[`i'],"begin_group","end_group","begin_repeat","end_repeat") & !inlist(type[`i'],"text","integer","decimal","date","datetime","note","calculate","calculate_here") & !inlist(type1[`i'],"select_one","select_multiple") {
-// 				local special = "[" + type[`i'] + "] "
-// 			}
-// 			else local special ""			
-//			
-// 			* Label + Hint Text
-// 			qui putexcel A`r' = (cond(type[`i'] != "note",varnumber[`i']," ")), fpattern(solid,"`c_3'") font(Calibri,12,white)
-// 			if type[`i'] == "note" local col G
-// 			else local col E
-// 			qui putexcel B`r':`col'`r' = (label`language'[`i'] + cond(!mi(hint`language'[`i']),"`=char(10)'" + hint`language'[`i'],"")) , merge border(top,thin,"`c_2'") txtwrap left top
-// 			local++r
-//			
-// 		}
-//		
-// 		** Response Options
-// 		* Calculations
-// 		if inlist(type[`i'],"calculate","calculate_here") {
-// 				local r = `r' - 1
-// 				qui putexcel F`r':G`r' = "Calculated Value", merge italic border(top,thin,"`c_2'") txtwrap left top
-// 				local++r
-// 		}
-//		
-// 		* Select One/Multiple
-// 		else if type1[`i'] == "select_one" | type1[`i'] == "select_multiple"	{
-// 			local table = type2[`i']
-// 			mata: st_local("mrows",strofreal(rows(`table')))
-// 			local s = `r' + `mrows' - 1
-// 			qui putexcel A`r':A`s' = (cond(type[`i'] != "note",varnumber[`i']," ")), merge fpattern(solid,"`c_3'") font(Calibri,12,white) left top
-// 			qui putexcel B`r':E`s' = (label`language'[`i'] + cond(!mi(hint`language'[`i']),"`=char(10)'" + hint`language'[`i'],"") + cond(type1[`i'] == "select_multiple","`=char(10)'"+"`=char(10)'"+"Select all that apply:","`=char(10)'"+"`=char(10)'"+"Select all that apply:") ) , merge border(top,thin,"`c_2'") txtwrap left top
-// 			getmata (value choicelabel)=`table', replace force
-// 			qui export excel value choicelabel using "`save'" in 1/`mrows', cell(F`r') sheet("Sheet1", modify)
-// 			drop value choicelabel 
-// 			local r = `r' + `mrows'
-// 		}
-//
-//
-// // 			if type1[`i'] == "select_multiple" {
-// // 				putdocx paragraph, halign(left) indent(left,25pt)
-// // 				putdocx text ("Select all that apply:"), `text' italic
-// // 			}
-// // 			local tname = name[`i']
-// // 			local table = type2[`i']
-// // 			putdocx table `tname' = mata(`table'), indent(40pt) border(all, nil) `choicetab'
-//
-// 		* Text Input
-// 		else if type[`i'] == "text" {
-// 				local r = `r' - 1
-// 				qui putexcel F`r':G`r' = "___________________", merge border(top,thin,"`c_2'") txtwrap left top
-// 				local++r
-// 			}
-//		
-// 		* Interger Input
-// 		else if type[`i'] == "integer" {
-// 				local r = `r' - 1
-// 				qui putexcel F`r':G`r' = "|_|_|_|_|_|", merge border(top,thin,"`c_2'") txtwrap left top
-// 				local++r
-// 			}
-//		
-// 		* Decimal Input
-// 		else if type[`i'] == "decimal" {
-// 				local r = `r' - 1
-// 				qui putexcel F`r':G`r' = "|_|_|_|_|_|.|_|_|", merge border(top,thin,"`c_2'") txtwrap left top
-// 				local++r
-// 			}		
-//
-// 		* Date
-// 		else if type[`i'] == "date" {
-// 				local r = `r' - 1
-// 				qui putexcel F`r':G`r' = "|_|_|/|_|_|/|_|_|_|_|", merge border(top,thin,"`c_2'") txtwrap left top
-// 				local++r
-// 		}
-//		
-// 		* Date-time
-// 		else if type[`i'] == "datetime" {
-// 				local r = `r' - 1
-// 				qui putexcel F`r':G`r' = "|_|_|/|_|_|/|_|_|_|_| - |_|_|:|_|_|:|_|_|", merge border(top,thin,"`c_2'") txtwrap left top
-// 				local++r
-// 		}		
-//		
-// 	} // End row loop
-//
-//	
 	
 	
 } 												// End putexcel if statement
