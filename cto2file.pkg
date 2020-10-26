@@ -1,0 +1,8 @@
+v 1.1
+d cto2file.  A Stata user-written command to convert SurveyCTO XLSforms to readable .docx and .xlsx files.
+d Created by Aaron Wolf (aaron.wolf@yale.edu)
+d
+d Note: cto2file is still a work in progress. Please feel free to comment and contribute at https://github.com/aarondwolf/cto2file.
+
+F cto2file.ado
+F cto2file.sthlp

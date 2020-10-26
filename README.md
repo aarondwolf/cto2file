@@ -2,35 +2,152 @@
 
 ---
 
-*cto2file* is a Stata user-written command that converts a SurveyCTO-compatible XLSForm into a readable and editable Word document (.xlsx).
+*cto2file* is a Stata user-written command that converts a SurveyCTO-compatible XLSForm into a readable and editable Word document (.docx) or Excel workbook (.xlsx).
 
 This command is very much an early work in progress. To date, I have only used it myself on a few SurveyCTO forms for my own projects. It works for these, but consistently throws errors with every new form. You are welcome to use this command yourself (or, even better, start a branch and try to improve it!), but be warned that it will be very finicky.
 
 The command utilizes Stata's *putdocx* command, and thus requires Version 15 or above to operate.
 
+## Installing via *net install*
 
-## Current Options
-The command accepts a number of options:
-- *default*: Specifies the default language for the form. This is used when the form has a default language that is not included in the *label*, *hint*, or *constraint message* fields. For example, if your default language for the form is english, and you also have the form translated into hindi, you may have a *label* field as well as a *label:hindi* field. In this case, you do **not** need to specify a default language. However, if you do not have a blank *label* field, but instead have both a *label:english* and *labelchichewa* field, you should specify which one is the default language. If no language is specified as the default, english will be assumed.
-- *language*: This specifies which language you want to use to construct the Word document. As in the example above, if no *default* language or *language* options are specified, the command will assume english, and use the un-specified language field.
-- *dropgroups*: Drops the *begin group* and *end group* fields with the names specified. Does not drop fields within the groups themselves, only the group identifiers.
-- *dropames*: Drops specific names from the Word document.
-- *droptypes*: Drops all names with a specific type. Any valid SurveyCTO type is accepted (e.g. *droptypes(calculate_here)*)
-- *omitnames*: Keeps the name in the final Word Document, but does not assign it a question number (or display the SurveyCTO name).
-- *omittypes*: Keeps all names with these types in the final Word Document, but does not assign a variable number or display teh SurveyCTO name. By default, groups, setup variables, and notes all have omitted variable numbers/names.
-- *keeptypes*: Allows you to specify types to display the name (e.g. caseid). Both omittypes and keeptypes cannot be included simultaneously.
-- *othersuffix*: If you have a consistent suffix for all "Other" variables (text variables which trigger if "Other" is selected), you can specify that suffix here, and it will format those fields appropriately, using the variable number from the assumed original variable.
-- *othernames*: Allows you to specify individual fields that represent "Other" options for a preceding select_one or select_multiple field.
-- *keepther*: By default, all "Other" variables are dropped for concision. Specifying this option will add them.
-- *keeprelevance*: By default, relevance fields are not displayed. Specifying this option displays them underneath the variable name in italics.
-- *title*: Specifies a title for the document (E.g. ABC Survey)
-- *subtitle*: Specifies a sub-title for the document (E.g. "v. 2019.01.01")
-- *maxheading*: The command generates heading levels based on nested groups. So the top-level group is heading 1, the first nested group is heading 2, etc. So the first-top level group will have heading number 1. The second top-level group would have heading 2. The first nested group within heading 2 will have the heading 2.1. This option allows the user to specify the maximum number of heading levels to be added to the document. The default is 5 (e.g. a group could be 1.1.1.1.1). After this point, the group name will be omitted from the survey, but the fields within them will remain.
-- *intlength*: Integer fields display boxes that can be written in, one for each unit. The command uses constraints to estimate how many digits are needed. If a field's constraint is something like ".>=0 or .=-999", the command will recognize the maximum possible number of digits as 4: 1 for the "-", and three for the "999". This integer will display with 4 boxes. The *intlength* option allows the user to set a default number for fields with no constraints, or complex constraints which may cause the command to fail to accurately parse the number of digits. The default is 9.
-- *declength*: Similar to intlength, but adding a decimal and digits after the decimal.
-- *scheme*: [NOT YET IMPLEMENTED] Allows the user to apply different sets of colors, fonts, and text sizes from a selection of pre-set schemes. This is not related to Stata's *scheme* command, which sets schemes for graphs.
-- *pagesize*: Sets the page size. Any *putdocx* page size is valid. The default is *letter*.
-- *split*: Creates a separate table for group (with heading level 1). By default, the document is written as one big table.
-- *novarnum*: Does not label variables with new variable numbers. Instead, used the *names* as variable numbers.
-- *command*: Allows the user to specify any commands to eliminate or change specific rows from the "survey" sheet in the XLSForm prior to writing.
+The current version is still a work in progress. To install, user can use the net install command to download from the project's Github page:
 
+```
+net install cto2file, from("https://aarondwolf.github.io/cto2file")
+```
+
+## Syntax
+
+```
+    cto2file using filename , save(filename) [options]
+```
+
+## Description
+
+cto2file uses the metadata generated by an existing SurveyCTO XLSForm to construct an editable
+Microsoft Word document or Excel file with appropriately-formated tables containing the
+variable names or numbers, the question asked (labels), hints, skip patterns (via relevance
+expressions), and choice lists.
+
+The resulting Word document contains headings for each group (with a cascading style using
+Word's default Heading 1, Heading 2,etc. for nested groups). The Excel document will have
+custom styled headings for each group level.
+
+   1.  The first column contains the variable name, or a calculated variable number.
+   2.  The second column contains the information in label (or label:language, if language is
+       specified), hints, and skip patterns (relevance exressions).
+   3.  The third column contains a numbered list of possible choices (for select_one and
+       select_multiple variables), a series of boxes to input digits for integer or decimal
+       variables, the phrase "calculated value" for calculate or calculate_here variables,
+       and is blank otherwise. For note fields, the second and third column are merged into
+       one.
+
+## Remarks
+
+The command imports the survey sheets from the filename specified. It then runs a series of
+commands to prepare the metadata for writing via the putdocx command. These include:
+
+   1.  Dropping all groups, names, and types specified in the dropggroups, dropnames, and
+       droptypes options.
+   2.  Executing commands specified in command.
+   3.  Generates new question numbers prefixed by V (if novarnum is not specified). E.g.
+       V001, V002, etc.
+           Note: note variables are not considered questions, and receive their own numbers
+           prefixed by "__n".
+   4.  Generates heading levels (e.g. Heading 1.0, Heading 1.1, Heading 2.0, etc.) for nested
+       groups.
+   5.  Re-writes relevance expressions to be more readable. This includes:
+           a.) Converting ${name} expressions to [name].
+           b.) Converting selected(${name},'value') to [name]=value.
+           c.) Adding a variable number to the variable reference (if novarnum is not
+               specified). E.g. V001 [name].
+   6.  Uses constraint expressions to estimate the number of integers/decimal places in
+       integer and decimal type variables. This defaults to intlength and declength for very
+       complicated expressions.
+   7.  Create individual tables for each set in the choices sheet.
+   8.  Writes a well-formated table in Word using the putdocx command for each row in the
+       survey sheet.
+   9.  Saves the document to the filename specified in save().
+
+cto2file requires the putdocx command introduced in Stata 15 to work.
+
+## Options
+
+### Main
+
+**save(filename)** specifies the name of the new Word document to be saved. This must be a valid 
+    filename with a .docx extension. This option is required.
+
+**default(language)** sets the default language if there is a label or hint column with no language
+    specified. The default is to rename this column labelenglish/hintenglish.
+
+**language(language)** set language to use for label and hint values. The default is the value from
+    default() option, which defaults to english if unspecified.
+
+**command(string)** executes a set of commands after importing the survey sheet. This option can
+    allow you to, e.g., replace the labels select variables, or replace constraint expressions
+    to simpler versions. Each command should be separated by compound double quotes and a
+    space. E.g.:
+
+​             cto2file using example.xslx, save(newfile.docx)        ///
+​                     command(`"command1"' `"command2"' ... )
+
+**title(string)** sets a survey title which appears at the beginning of the document.
+
+**subtitle(string)** sets a survey subtitle which appears beneath the title.
+
+**pagesize(string)** sets the page size for the Word document. The default is letter. Any valid 
+    putdocx page size is accepted.
+
+**scheme(string)** sets the color scheme used in the final document.  This option is not related to
+    Stata's schemes. Available color schemes are purple, blue, green, orange, drab, and
+    colorful. The default is blue.
+
+**intlength(int)** number of spaces provided for integer variable inputs when this cannot be
+    determined by the variable constraints. Default is 9.
+
+**declength(int)** number of spaces provided for decimal variable inputs when this cannot be
+    determined by the variable constraints. Default is 9.
+
+**splitcreate** a new table in the Word document for every top-level group.
+
+**maxheading(int)** maximum number of nested group-levels to keep. Default is 3.
+
+**keeprelevance** apply set of edits to relevance expressions and display them in the document.
+
+### Variable Numbering
+
+**novarnumdo** not re-number variables. Keep the name value as the variable names in the left-most
+    column of the document.
+
+**omitnames(namelist)** do not generate variable numbers for specified variable names.
+
+**omittypes(namelist)** do not generate variable numbers for specified types. By default, begin
+    group, end group, begin repeat, end repeat, comments, note, username, caseid, start, end,
+    deviceid, text audit, and audio audit are omitted from having variable numbers generated.
+
+**keeptypes(namelist)** apply new variable numbers to specified variable types.
+
+### Drop Variables
+
+**dropgroups(namelist)** drop all group headings with the names specified.
+
+**dropnames(namelist)** drop all variables with the names specified.
+
+**droptypes(namelist)** drop all variables with the types specified.
+
+### Other Variables
+
+**othersuffix(string)** specify a suffix common to all variables that represent "Other" or "Other
+    (Specify)" text inputs. These will not have unique variable numbers added.
+
+**othernames(namelist)** specify that all variables with the names specified are "Other" or "Other
+    (Specify)" variables.
+
+**keepotherkeep** "Other" and "Other (Specify)" variables in the document. The default is to drop
+    them.
+
+## Author
+
+Aaron Wolf, Yale University
+aaron.wolf@yale.edu

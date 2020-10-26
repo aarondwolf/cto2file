@@ -1,0 +1,11 @@
+v 1.1
+d Created by Aaron Wolf (aaron.wolf@yale.edu)
+
+d 	Installation instructions:
+d	net install cto2file, from("https://aarondwolf.github.io/cto2file") replace
+d
+d	cto2file is still a work in progress.
+d Please feel free to comment and contribute at https://github.com/aarondwolf/ctometa.
+
+
+p cto2file A Stata user-written command to convert SurveyCTO XLSforms to readable .docx and .xlsx files.
