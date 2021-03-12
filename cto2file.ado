@@ -1,4 +1,4 @@
-*! version 2.0.1  9may2020 Aaron Wolf, aaron.wolf@yale.edu
+*! version 2.0.2  9may2021 Aaron Wolf, aaron.wolf@yale.edu
 cap program drop cto2file
 program define cto2file
 
@@ -26,6 +26,7 @@ program define cto2file
 					Pagesize(passthru)			///
 					split						///
 					novarnum					///
+					noheadnum					///
 					COmmand(string asis)		///
 					]
 
@@ -436,7 +437,8 @@ if "`file'" == "docx" { 						// Begin putdocx if statement
 			if heading[`i'] == 1 putdocx sectionbreak
 
 			putdocx paragraph, style(`heading')
-			putdocx text ("`module' - `label'`repeat'"), `linebreak'
+			if "`headnum'" == "" putdocx text ("`module' - `label'`repeat'"), `linebreak'
+			else if "`headnum'" == "noheadnum" putdocx text ("`label'`repeat'"), `linebreak'
 			putdocx paragraph
 			putdocx text (relevance[`i']), `relevancetext'
 				
@@ -449,7 +451,8 @@ if "`file'" == "docx" { 						// Begin putdocx if statement
 			else local repeat ""
 
 			putdocx paragraph,  halign(right)
-			putdocx text ("	End `repeat'Group: `module' - `label'"),  `endtext'
+			if "`headnum'" == "" putdocx text ("	End `repeat'Group: `module' - `label'"),  `endtext'
+			else if "`headnum'" == "noheadnum" putdocx text ("	End `repeat'Group: `label'"),  `endtext'
 			*putdocx table surveytable(`i',1) = ("	End `repeat'Group: `module' - `label'"), colspan(`columns') `endtext' halign(right)
 		}
 		
@@ -665,8 +668,8 @@ qui {
 	}
 	bysort sort (lsort): replace A = varnumber if _n == 1 & type != "note"
 	bysort sort (lsort): replace B = label`language' + cond(!mi(hint`language'),"`=char(10)'" + hint`language',"") if _n == 1
-	replace B = module + " - " + label`language' + cond(type=="begin repeat"," (Repeat Group)","") if inlist(type,"begin group","begin repeat")
-	bysort name (sort lsort): replace B = "End " + cond(type=="end repeat","Repeat ","") + "Group: " + module[1] + " - " + label`language'[1] if inlist(type,"end group","end repeat")
+	replace B = cond("`headnum'"=="",module + " - ","") + label`language' + cond(type=="begin repeat"," (Repeat Group)","") if inlist(type,"begin group","begin repeat")
+	bysort name (sort lsort): replace B = "End " + cond(type=="end repeat","Repeat ","") + "Group: " + cond("`headnum'"=="",module[1] + " - ","") + label`language'[1] if inlist(type,"end group","end repeat")
 	sort sort lsort
 	replace D = "Calculated Value" 							if inlist(type,"calculate","calculate_here")
 	replace D = "___________________" 						if type == "text"

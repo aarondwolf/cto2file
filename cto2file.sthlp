@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 1.0.0 Aaron Wolf 15may2019}{...}
+{* *! version 2.0.2 Aaron Wolf 9may2021}{...}
 {title:Title}
 
 {phang}
@@ -33,6 +33,7 @@
 
 {syntab:Variable Numbering}
 {synopt:{opt novarnum}}do not re-number variables.{p_end}
+{synopt:{opt noheadnum}}do not add auto-generated heading levels to begin and end group labels.{p_end}
 {synopt:{opt omitn:ames(namelist)}}do not generate variable numbers for specified variable names.{p_end}
 {synopt:{opt omitt:ypes(namelist)}}do not generate variable numbers for specified types.{p_end}
 {synopt:{opt keept:ypes(namelist)}}apply new variable numbers to specified variable types.{p_end}
