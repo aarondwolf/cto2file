@@ -1,5 +1,5 @@
 v 2.0.2
-d Created by Aaron Wolf (aaron.wolf@yale.edu)
+d Created by Aaron Wolf (aaron.wolf@u.northwestern.edu)
 
 d 	Installation instructions:
 d	net install cto2file, from("https://aarondwolf.github.io/cto2file") replace

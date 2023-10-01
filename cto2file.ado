@@ -1,4 +1,4 @@
-*! version 2.0.2  9may2021 Aaron Wolf, aaron.wolf@yale.edu
+*! version 2.0.2  9may2021 Aaron Wolf, aaron.wolf@u.northwestern.edu
 cap program drop cto2file
 program define cto2file
 
